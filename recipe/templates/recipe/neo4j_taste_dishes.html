@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>口味关联菜品查询</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            width: 800px;
+            margin: 30px auto;
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+
+        form {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        input[type="text"] {
+            width: 300px;
+            padding: 8px;
+            font-size: 16px;
+        }
+
+        button {
+            padding: 8px 16px;
+            font-size: 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .result-box {
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 8px;
+            background-color: #fafafa;
+            margin-top: 15px;
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-top: 20px;
+            text-decoration: none;
+            color: white;
+            background-color: #888;
+            padding: 10px 16px;
+            border-radius: 5px;
+        }
+
+        ul {
+            line-height: 1.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>查询某种口味有哪些菜</h1>
+
+        <form method="get">
+            <input type="text" name="name" value="{{ taste_name }}" placeholder="请输入口味，如香辣味">
+            <button type="submit">查询</button>
+        </form>
+
+        {% if taste_name %}
+            <div class="result-box">
+                <h3>查询结果：{{ taste_name }}</h3>
+
+                {% if results %}
+                    <ul>
+                        {% for item in results %}
+                            <li>{{ item.dish_name }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p>没有找到该口味对应的菜品</p>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        <a href="/recipes/" class="back-link">返回菜谱列表</a>
+    </div>
+</body>
+</html>

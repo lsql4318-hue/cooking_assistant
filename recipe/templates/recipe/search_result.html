@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>搜索结果</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            width: 800px;
+            margin: 30px auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+
+        form {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        input[type="text"] {
+            width: 300px;
+            padding: 8px;
+            font-size: 16px;
+        }
+
+        button {
+            padding: 8px 16px;
+            font-size: 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        .recipe-card {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            background-color: #fafafa;
+        }
+
+        .recipe-card h2 a {
+            text-decoration: none;
+            color: #2c3e50;
+        }
+
+        .recipe-card h2 a:hover {
+            color: #4CAF50;
+        }
+
+        .recipe-card p {
+            color: #555;
+            line-height: 1.6;
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-top: 15px;
+            text-decoration: none;
+            color: white;
+            background-color: #4CAF50;
+            padding: 10px 16px;
+            border-radius: 5px;
+        }
+
+        .back-link:hover {
+            background-color: #45a049;
+        }
+
+        .keyword {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>搜索结果</h1>
+
+        <form action="/search/" method="get">
+            <input type="text" name="keyword" value="{{ keyword }}" placeholder="请输入菜名">
+            <button type="submit">搜索</button>
+        </form>
+
+        <hr>
+
+        <p>当前关键词：<span class="keyword">{{ keyword }}</span></p>
+
+        {% if recipes %}
+            {% for recipe in recipes %}
+                <div class="recipe-card">
+                    <h2><a href="/recipe/{{ recipe.id }}/">{{ recipe.name }}</a></h2>
+                    <p><strong>食材：</strong>{{ recipe.ingredients }}</p>
+                    <p><strong>烹饪时间：</strong>{{ recipe.cooking_time }} 分钟</p>
+                </div>
+            {% endfor %}
+        {% else %}
+            <p>没有找到相关菜谱</p>
+        {% endif %}
+
+        <a href="/recipes/" class="back-link">返回菜谱列表</a>
+    </div>
+</body>
+</html>
