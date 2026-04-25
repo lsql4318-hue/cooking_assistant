@@ -8,6 +8,10 @@ from django.views.decorators.http import require_POST, require_GET,require_http_
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.utils import timezone
 import re
+from collections import Counter
+from django.db.models import Q
+from users.models import BrowseHistory
+import random
 
 def hello(request):
     return HttpResponse("这是我的第一个接口")
@@ -287,7 +291,6 @@ def api_qa(request):
 
     # -----------------------------
     # 规则 2：时间 / 难度 / 菜系 组合筛选
-    # 这部分要放在“食材查菜品”前面
     # -----------------------------
     has_time_query = ('分钟' in normalized_question or '半小时' in normalized_question or '小时' in normalized_question)
     has_difficulty_query = any(word in normalized_question for word in ['简单', '中等', '较难', '新手', '容易', '困难'])
@@ -1359,3 +1362,225 @@ def api_delete_recipe_comment(request, comment_id):
         'success': True,
         'message': '评论删除成功'
     }, json_dumps_params={'ensure_ascii': False})
+
+@require_GET
+@login_required
+def api_weekly_recommend_recipes(request):
+    user = request.user
+    refresh = request.GET.get('refresh', '')
+
+    day_names = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+
+    # 1. 获取用户收藏、点赞、浏览记录
+    favorite_recipe_ids = list(
+        RecipeFavorite.objects.filter(user=user).values_list('recipe_id', flat=True)
+    )
+
+    liked_recipe_ids = list(
+        RecipeLike.objects.filter(user=user).values_list('recipe_id', flat=True)
+    )
+
+    history_dish_names = list(
+        BrowseHistory.objects.filter(user=user)
+        .values_list('dish_name', flat=True)[:80]
+    )
+
+    # 2. 找出用户产生过行为的菜谱
+    interacted_recipes = Recipe.objects.filter(
+        Q(id__in=favorite_recipe_ids) |
+        Q(id__in=liked_recipe_ids) |
+        Q(title__in=history_dish_names)
+    ).prefetch_related('ingredients')
+
+    # 3. 统计用户偏好的菜系、食材、难度
+    category_counter = Counter()
+    ingredient_counter = Counter()
+    difficulty_counter = Counter()
+
+    interacted_ids = set()
+
+    for recipe in interacted_recipes:
+        interacted_ids.add(recipe.id)
+
+        if recipe.category:
+            category_counter[recipe.category] += 3
+
+        if recipe.difficulty:
+            difficulty_counter[recipe.difficulty] += 2
+
+        for ingredient in recipe.ingredients.all():
+            if ingredient.name:
+                ingredient_counter[ingredient.name] += 1
+
+    for recipe_id in favorite_recipe_ids:
+        interacted_ids.add(recipe_id)
+
+    for recipe_id in liked_recipe_ids:
+        interacted_ids.add(recipe_id)
+
+    # 4. 获取候选菜谱：优先推荐未浏览/未点赞/未收藏过的审核通过菜谱
+    candidate_recipes = Recipe.objects.filter(
+        review_status='approved'
+    ).exclude(
+        id__in=interacted_ids
+    ).prefetch_related('ingredients')
+
+    scored_recipes = []
+
+    for recipe in candidate_recipes:
+        score = 0
+
+        # 系统推荐菜加分
+        if recipe.is_recommended:
+            score += 5
+
+        # 浏览热度加分
+        score += min(recipe.views or 0, 100) * 0.05
+
+        # 点赞、收藏加分
+        score += (recipe.likes or 0) * 0.5
+        score += (recipe.favorites or 0) * 0.8
+
+        # 菜系偏好加分
+        if recipe.category:
+            score += category_counter.get(recipe.category, 0) * 4
+
+        # 难度偏好加分
+        if recipe.difficulty:
+            score += difficulty_counter.get(recipe.difficulty, 0) * 2
+
+        # 食材偏好加分
+        for ingredient in recipe.ingredients.all():
+            score += ingredient_counter.get(ingredient.name, 0) * 2
+
+        # 点击“换一组推荐”时加入随机扰动，避免每次结果完全一样
+        if refresh:
+            score += random.uniform(0, 8)
+
+        scored_recipes.append((score, recipe))
+
+    # 5. 按分数排序
+    scored_recipes.sort(key=lambda x: x[0], reverse=True)
+
+    # 6. 先从前 14 个候选中选 7 个
+    top_candidates = [item[1] for item in scored_recipes[:14]]
+
+    if refresh and len(top_candidates) > 7:
+        recommended_recipes = random.sample(top_candidates, 7)
+    else:
+        recommended_recipes = top_candidates[:7]
+
+    # 7. 如果个性化候选不足 7 个，用热门菜谱补足
+    if len(recommended_recipes) < 7:
+        existing_ids = [recipe.id for recipe in recommended_recipes]
+
+        fallback_recipes = list(
+            Recipe.objects.filter(
+                review_status='approved'
+            ).exclude(
+                id__in=existing_ids
+            ).order_by('-is_recommended', '-views', '-favorites', '-likes')[:20]
+        )
+
+        if refresh and len(fallback_recipes) > 7:
+            random.shuffle(fallback_recipes)
+
+        needed_count = 7 - len(recommended_recipes)
+        recommended_recipes.extend(fallback_recipes[:needed_count])
+
+    # 8. 如果还是不足 7 个，说明数据库审核通过菜谱本身太少
+    weekly_menu = []
+
+    for index, recipe in enumerate(recommended_recipes[:7]):
+        weekly_menu.append({
+            'day': day_names[index],
+            'id': recipe.id,
+            'title': recipe.title,
+            'category': recipe.category or '',
+            'difficulty': recipe.difficulty or '',
+            'cook_time': recipe.cook_time or '',
+            'description': recipe.description or '',
+            'image': recipe.image.url if recipe.image else '',
+            'reason': build_recommend_reason(
+                recipe,
+                category_counter,
+                ingredient_counter,
+                difficulty_counter
+            ),
+        })
+
+    return JsonResponse({
+        'success': True,
+        'message': '一周推荐菜谱生成成功',
+        'weekly_menu': weekly_menu
+    }, json_dumps_params={'ensure_ascii': False})
+
+
+def build_recommend_reason(recipe, category_counter, ingredient_counter, difficulty_counter):
+    reasons = []
+
+    if recipe.category and category_counter.get(recipe.category, 0) > 0:
+        reasons.append(f'你近期偏好{recipe.category}')
+
+    if recipe.difficulty and difficulty_counter.get(recipe.difficulty, 0) > 0:
+        reasons.append(f'符合你常看的{recipe.difficulty}难度')
+
+    matched_ingredients = []
+    for ingredient in recipe.ingredients.all():
+        if ingredient_counter.get(ingredient.name, 0) > 0:
+            matched_ingredients.append(ingredient.name)
+
+    if matched_ingredients:
+        reasons.append(f'包含你常关注的食材：{"、".join(matched_ingredients[:2])}')
+
+    if recipe.is_recommended:
+        reasons.append('系统推荐菜品')
+
+    if recipe.views and recipe.views > 0:
+        reasons.append('近期浏览热度较高')
+
+    if recipe.favorites and recipe.favorites > 0:
+        reasons.append('收藏热度较高')
+
+    if recipe.likes and recipe.likes > 0:
+        reasons.append('点赞热度较高')
+
+    if not reasons:
+        reasons.append('根据热门菜谱为你推荐')
+
+    return '；'.join(reasons)
+
+
+def build_recommend_reason(recipe, category_counter, ingredient_counter, difficulty_counter):
+    reasons = []
+
+    if getattr(recipe, 'category', '') and category_counter.get(recipe.category, 0) > 0:
+        reasons.append(f'你近期偏好{recipe.category}')
+
+    if getattr(recipe, 'difficulty', '') and difficulty_counter.get(recipe.difficulty, 0) > 0:
+        reasons.append(f'符合你常看的{recipe.difficulty}难度')
+
+    matched_ingredients = []
+    for ingredient in recipe.ingredients.all():
+        if ingredient_counter.get(ingredient.name, 0) > 0:
+            matched_ingredients.append(ingredient.name)
+
+    if matched_ingredients:
+        reasons.append(f'包含你常关注的食材：{"、".join(matched_ingredients[:2])}')
+
+    if getattr(recipe, 'is_recommended', False):
+        reasons.append('系统推荐菜品')
+
+    if getattr(recipe, 'views', 0):
+        reasons.append('近期浏览热度较高')
+
+    if getattr(recipe, 'favorites', 0):
+        reasons.append('收藏热度较高')
+
+    if getattr(recipe, 'likes', 0):
+        reasons.append('点赞热度较高')
+
+    if not reasons:
+        reasons.append('根据热门菜谱为你推荐')
+
+    return '；'.join(reasons)

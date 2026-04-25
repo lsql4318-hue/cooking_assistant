@@ -16,6 +16,7 @@ from .views import (
     api_recipe_comments,
     api_add_recipe_comment,
     api_delete_recipe_comment,
+    api_weekly_recommend_recipes
 )
 
 urlpatterns = [
@@ -36,4 +37,5 @@ urlpatterns = [
     path('recipes/<int:recipe_id>/comments/', api_recipe_comments),
     path('recipes/<int:recipe_id>/comments/add/', api_add_recipe_comment),
     path('recipes/comments/<int:comment_id>/delete/', api_delete_recipe_comment),
+    path('recipes/week-recommend/', api_weekly_recommend_recipes),
 ]
